@@ -48,7 +48,7 @@ class FeatureExtractor:
             volatility
         ]
         
-        # 移除技术指标，仅保留基础特征
+        # 1. 基础特征 (5个)
         features = [
             base_pred, 
             last_price, 
@@ -57,36 +57,62 @@ class FeatureExtractor:
             volatility
         ]
         
+        # 2. 增加技术指标 (6个)
+        indicators = FeatureExtractor._calculate_indicators(context)
+        features.extend(indicators)
+        
+        # 3. 原始 OHLCV (4个)
         if ohlcv_context is not None and ohlcv_context.shape[1] >= 4:
-            # ohlcv_context: [N, 4] -> open, high, low, volume
+            # 这里的 ohlcv_context 会包含: open, high, low, close, volume (虽然我们只用4个)
             last_ohlcv = ohlcv_context[-1]
-            op, hi, lo, vol = last_ohlcv
-            cl = last_price
-            
-            # 引入 K 线结构特征 (9个)
-            body = abs(cl - op)
-            upper_sh = hi - max(op, cl)
-            lower_sh = min(op, cl) - lo
-            rng = hi - lo if hi != lo else 1e-6
-            
-            features.extend([
-                body,
-                upper_sh,
-                lower_sh,
-                rng,
-                body / rng,
-                upper_sh / rng,
-                lower_sh / rng,
-                (cl - lo) / rng,
-                1.0 if cl > op else 0.0
-            ])
-            # 保留原始成交量
-            features.append(vol)
+            op, hi, lo, cl, vol = last_ohlcv
+            features.extend([op, hi, lo, vol])
         else:
-            # 填充 9个结构特征 + 1个成交量
-            features.extend([0.0] * 10)
+            features.extend([0.0] * 4)
             
         return np.array(features, dtype=np.float32)
+
+    @staticmethod
+    def _calculate_indicators(context: np.ndarray) -> List[float]:
+        """计算 MACD, RSI, Bollinger Bands。"""
+        if len(context) < 30:
+            return [0.0] * 6
+            
+        # EMA 函数
+        def ema(data, window):
+            alpha = 2 / (window + 1)
+            ema_values = np.zeros_like(data)
+            ema_values[0] = data[0]
+            for i in range(1, len(data)):
+                ema_values[i] = alpha * data[i] + (1 - alpha) * ema_values[i-1]
+            return ema_values
+            
+        # MACD
+        ema12 = ema(context, 12)
+        ema26 = ema(context, 26)
+        macd_line = ema12 - ema26
+        signal_line = ema(macd_line, 9)
+        macd_hist = macd_line - signal_line
+        
+        # RSI (14)
+        delta = np.diff(context)
+        gain = np.where(delta > 0, delta, 0)
+        loss = np.where(delta < 0, -delta, 0)
+        avg_gain = np.mean(gain[-14:])
+        avg_loss = np.mean(loss[-14:])
+        if avg_loss == 0:
+            rsi = 100.0
+        else:
+            rs = avg_gain / avg_loss
+            rsi = 100.0 - (100.0 / (1.0 + rs))
+            
+        # Bollinger Bands (20)
+        ma20 = np.mean(context[-20:])
+        std20 = np.std(context[-20:])
+        upper = ma20 + 2 * std20
+        lower = ma20 - 2 * std20
+        
+        return [float(macd_line[-1]), float(signal_line[-1]), float(macd_hist[-1]), float(rsi), float(upper), float(lower)]
 
     @staticmethod
     def _calculate_indicators(context: np.ndarray) -> List[float]:
@@ -162,16 +188,17 @@ def train_linear_adapter(
     X_scaled = scaler.fit_transform(train_X)
     residuals = train_y - train_base
     
-    # 增加偏置项进行最小二乘法求解
-    ones = np.ones((X_scaled.shape[0], 1), dtype=np.float32)
-    X_aug = np.concatenate([X_scaled, ones], axis=1)
+    # 6. 训练线性回归 (使用 lstsq 增加稳定性)
+    X_aug = np.concatenate([X_scaled, np.ones((X_scaled.shape[0], 1), dtype=np.float32)], axis=1)
     
-    coef, *_ = np.linalg.lstsq(X_aug, residuals, rcond=None)
+    print(f"X_aug stats: min={np.min(X_aug):.2e}, max={np.max(X_aug):.2e}, has_nan={np.any(np.isnan(X_aug))}")
+    
+    coef, residuals_sum, rank, s = np.linalg.lstsq(X_aug, residuals, rcond=0.01)
     
     feature_names = [
         "base_pred", "last_price", "mean_price", "pct_change", "volatility",
-        "k_body", "k_upper_sh", "k_lower_sh", "k_range", "k_body_ratio", 
-        "k_upper_ratio", "k_lower_ratio", "k_close_pos", "k_direction", "volume"
+        "macd", "macd_signal", "macd_hist", "rsi", "boll_upper", "boll_lower",
+        "open", "high", "low", "volume"
     ]
     
     return AdapterWeights(
@@ -223,6 +250,8 @@ def main():
     parser.add_argument("--context-len", type=int, default=60, help="上下文长度")
     parser.add_argument("--horizon-len", type=int, default=1, help="预测步长")
     
+    parser.add_argument("--train-days", type=int, default=None, help="仅使用最近 N 天的数据进行训练。")
+    
     args = parser.parse_args()
 
     STOCK_CODE = args.stock_code
@@ -241,42 +270,58 @@ def main():
         print(f"数据文件 {DATA_PATH} 不存在，请先准备数据。")
     else:
         df = pd.read_csv(DATA_PATH)
+        # 数据清洗：填充缺失值
+        df = df.ffill().bfill()
+        
+        # 截取训练窗口
+        if args.train_days:
+            print(f"截取最近 {args.train_days} 天的数据进行训练...")
+            # 保证有足够的 context 长度
+            df = df.tail(args.train_days + CONTEXT_LEN + HORIZON_LEN)
+            
         prices = df["value"].values
         # 提取 K 线数据作为特征
-        ohlcv_cols = ["open", "high", "low", "volume"]
+        ohlcv_cols = ["open", "high", "low", "close", "volume"]
         ohlcv = df[ohlcv_cols].values if all(c in df.columns for c in ohlcv_cols) else None
         
         # 3. 准备微调数据
-        n_samples = len(prices) - CONTEXT_LEN - HORIZON_LEN
+        samples = []
+        targets = []
+        base_preds = []
+        
+        n_samples = len(prices) - CONTEXT_LEN - HORIZON_LEN + 1 # Adjusted n_samples calculation
         if n_samples <= 0:
             print("数据量不足以进行微调训练。")
         else:
-            train_X = []
-            train_y = []
-            train_base = [] # 模拟基础预测
-            
             print(f"生成训练样本: {n_samples} 个...")
+            
             for i in range(n_samples):
+                # 获取上下文
                 context = prices[i : i + CONTEXT_LEN]
-                target = prices[i + CONTEXT_LEN]
+                # 目标是收盘价的残差
+                target = prices[i + CONTEXT_LEN + HORIZON_LEN - 1] # Target is at horizon_len
+                
+                # 基础预测 (从模型获取或简单假设为今日收盘)
+                base_pred = context[-1] # Base prediction is the last value of context
                 
                 # 提取 K 线上下文特征
                 ohlcv_context = ohlcv[i : i + CONTEXT_LEN] if ohlcv is not None else None
                 
-                # 注意：为了演示，我们假设基础预测值就是 context 的最后一个值（简单基准）
-                # 在生产环境中，这应该是 TimesFM 给出的预测值
-                base_pred = prices[i + CONTEXT_LEN - 1]
-                
+                # 计算特征 (26维 + base_pred)
                 feats = FeatureExtractor.compute(context, base_pred, ohlcv_context=ohlcv_context)
-                train_X.append(feats)
-                train_y.append(target)
-                train_base.append(base_pred)
+                
+                samples.append(feats)
+                targets.append(target)
+                base_preds.append(base_pred)
+                
+            train_X = np.array(samples, dtype=np.float32)
+            train_y = np.array(targets, dtype=np.float32)
+            train_base = np.array(base_preds, dtype=np.float32)
             
-            train_X = np.array(train_X)
-            train_y = np.array(train_y)
-            train_base = np.array(train_base)
+            # 4. 再次清洗训练矩阵，防止溢出
+            train_X = np.nan_to_num(train_X, nan=0.0, posinf=0.0, neginf=0.0)
             
-            # 4. 训练适配器
+            # 5. 训练适配器
             weights = train_linear_adapter(
                 train_X=train_X,
                 train_y=train_y,

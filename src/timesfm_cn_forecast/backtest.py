@@ -66,7 +66,7 @@ def run_backtest(
     model_dir = 默认模型目录()
     if adapter_path:
         model = load_advanced_model(model_dir, adapter_path)
-        ohlcv_cols = ["open", "high", "low", "volume"]
+        ohlcv_cols = ["open", "high", "low", "close", "volume"]
         ohlcv_data = df[ohlcv_cols].values if all(c in df.columns for c in ohlcv_cols) else None
     else:
         model = 加载模型(model_dir)
