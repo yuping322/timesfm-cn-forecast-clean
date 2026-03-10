@@ -136,14 +136,23 @@ def load_adapter(path: str) -> AdapterWeights:
 def main():
     import os
     import pandas as pd
+    import argparse
     from pathlib import Path
 
-    # 1. 暴露微调参数
-    STOCK_CODE = "002074"
-    DATA_PATH = Path("data/gotion_prep/history.csv")
-    ADAPTER_SAVE_PATH = Path("data/gotion_adapter.pth")
-    CONTEXT_LEN = 60
-    HORIZON_LEN = 1
+    parser = argparse.ArgumentParser(description="训练线性残差适配器。")
+    parser.add_argument("--stock-code", type=str, required=True, help="股票代码")
+    parser.add_argument("--data-path", type=str, required=True, help="训练数据 (history.csv) 的路径")
+    parser.add_argument("--output-path", type=str, required=True, help="适配器权重 (.pth) 的保存路径")
+    parser.add_argument("--context-len", type=int, default=60, help="上下文长度")
+    parser.add_argument("--horizon-len", type=int, default=1, help="预测步长")
+    
+    args = parser.parse_args()
+
+    STOCK_CODE = args.stock_code
+    DATA_PATH = Path(args.data_path)
+    ADAPTER_SAVE_PATH = Path(args.output_path)
+    CONTEXT_LEN = args.context_len
+    HORIZON_LEN = args.horizon_len
     
     print(f"开始为股票 {STOCK_CODE} 训练线性适配器...")
     
@@ -157,7 +166,8 @@ def main():
         df = pd.read_csv(DATA_PATH)
         prices = df["value"].values
         # 提取 K 线数据作为特征
-        ohlcv = df[["open", "high", "low", "volume"]].values
+        ohlcv_cols = ["open", "high", "low", "volume"]
+        ohlcv = df[ohlcv_cols].values if all(c in df.columns for c in ohlcv_cols) else None
         
         # 3. 准备微调数据
         n_samples = len(prices) - CONTEXT_LEN - HORIZON_LEN
@@ -174,7 +184,7 @@ def main():
                 target = prices[i + CONTEXT_LEN]
                 
                 # 提取 K 线上下文特征
-                ohlcv_context = ohlcv[i : i + CONTEXT_LEN]
+                ohlcv_context = ohlcv[i : i + CONTEXT_LEN] if ohlcv is not None else None
                 
                 # 注意：为了演示，我们假设基础预测值就是 context 的最后一个值（简单基准）
                 # 在生产环境中，这应该是 TimesFM 给出的预测值
