@@ -32,7 +32,7 @@ class FeatureExtractor:
         9. 成交量 (volume) - 如果提供
         """
         if len(context) == 0:
-            return np.zeros(21, dtype=np.float32)
+            return np.zeros(15, dtype=np.float32)
             
         last_price = context[-1]
         mean_price = float(np.mean(context))
@@ -48,9 +48,14 @@ class FeatureExtractor:
             volatility
         ]
         
-        # 增加技术指标
-        indicators = FeatureExtractor._calculate_indicators(context)
-        features.extend(indicators)
+        # 移除技术指标，仅保留基础特征
+        features = [
+            base_pred, 
+            last_price, 
+            mean_price, 
+            pct_change, 
+            volatility
+        ]
         
         if ohlcv_context is not None and ohlcv_context.shape[1] >= 4:
             # ohlcv_context: [N, 4] -> open, high, low, volume
@@ -165,7 +170,6 @@ def train_linear_adapter(
     
     feature_names = [
         "base_pred", "last_price", "mean_price", "pct_change", "volatility",
-        "macd", "macd_signal", "macd_hist", "rsi", "boll_upper", "boll_lower",
         "k_body", "k_upper_sh", "k_lower_sh", "k_range", "k_body_ratio", 
         "k_upper_ratio", "k_lower_ratio", "k_close_pos", "k_direction", "volume"
     ]
