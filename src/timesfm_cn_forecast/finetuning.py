@@ -32,7 +32,7 @@ class FeatureExtractor:
         9. 成交量 (volume) - 如果提供
         """
         if len(context) == 0:
-            return np.zeros(15, dtype=np.float32)
+            return np.zeros(21, dtype=np.float32)
             
         last_price = context[-1]
         mean_price = float(np.mean(context))
@@ -53,11 +53,33 @@ class FeatureExtractor:
         features.extend(indicators)
         
         if ohlcv_context is not None and ohlcv_context.shape[1] >= 4:
-            # ohlcv_context 假设为 [N, 4] -> open, high, low, volume
+            # ohlcv_context: [N, 4] -> open, high, low, volume
             last_ohlcv = ohlcv_context[-1]
-            features.extend(last_ohlcv.tolist())
+            op, hi, lo, vol = last_ohlcv
+            cl = last_price
+            
+            # 引入 K 线结构特征 (9个)
+            body = abs(cl - op)
+            upper_sh = hi - max(op, cl)
+            lower_sh = min(op, cl) - lo
+            rng = hi - lo if hi != lo else 1e-6
+            
+            features.extend([
+                body,
+                upper_sh,
+                lower_sh,
+                rng,
+                body / rng,
+                upper_sh / rng,
+                lower_sh / rng,
+                (cl - lo) / rng,
+                1.0 if cl > op else 0.0
+            ])
+            # 保留原始成交量
+            features.append(vol)
         else:
-            features.extend([0.0] * 4)
+            # 填充 9个结构特征 + 1个成交量
+            features.extend([0.0] * 10)
             
         return np.array(features, dtype=np.float32)
 
@@ -144,7 +166,8 @@ def train_linear_adapter(
     feature_names = [
         "base_pred", "last_price", "mean_price", "pct_change", "volatility",
         "macd", "macd_signal", "macd_hist", "rsi", "boll_upper", "boll_lower",
-        "open", "high", "low", "volume"
+        "k_body", "k_upper_sh", "k_lower_sh", "k_range", "k_body_ratio", 
+        "k_upper_ratio", "k_lower_ratio", "k_close_pos", "k_direction", "volume"
     ]
     
     return AdapterWeights(
