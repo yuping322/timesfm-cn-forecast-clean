@@ -1,0 +1,10 @@
+data/
+outputs/
+output/
+*.pth
+*.png
+__pycache__/
+.env
+.ipynb_checkpoints/
+local_timesfm_model/
+.DS_Store

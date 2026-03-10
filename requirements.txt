@@ -1,0 +1,9 @@
+numpy>=1.26.4
+pandas>=2.0.2
+matplotlib>=3.7.1
+
+# 上游 TimesFM 仓库自身依赖 torch / huggingface_hub / safetensors
+# 如果单独安装 skill 的可选数据源依赖，可按需补充：
+# oss2
+# tushare
+# akshare

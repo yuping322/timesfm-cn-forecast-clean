@@ -1,0 +1,3 @@
+[console_scripts]
+timesfm-cn-finetune = timesfm_cn_forecast.advanced.finetuning:main
+timesfm-cn-forecast = timesfm_cn_forecast.cli:main

@@ -1,0 +1,25 @@
+[build-system]
+requires = ["setuptools>=61.0"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "timesfm-cn-forecast"
+version = "0.1.0"
+description = "Clean standalone version of the Chinese stock forecasting skill for TimesFM"
+readme = "README.md"
+requires-python = ">=3.10"
+dependencies = [
+    "pandas",
+    "numpy",
+    "akshare",
+    "tushare",
+    "torch",
+    "matplotlib",
+]
+
+[project.scripts]
+timesfm-cn-forecast = "timesfm_cn_forecast.cli:main"
+timesfm-cn-finetune = "timesfm_cn_forecast.advanced.finetuning:main"
+
+[tool.setuptools.packages.find]
+where = ["src"]

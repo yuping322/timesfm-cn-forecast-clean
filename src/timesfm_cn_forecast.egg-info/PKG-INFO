@@ -1,0 +1,73 @@
+Metadata-Version: 2.4
+Name: timesfm-cn-forecast
+Version: 0.1.0
+Summary: Clean standalone version of the Chinese stock forecasting skill for TimesFM
+Requires-Python: >=3.10
+Description-Content-Type: text/markdown
+Requires-Dist: pandas
+Requires-Dist: numpy
+Requires-Dist: akshare
+Requires-Dist: tushare
+Requires-Dist: torch
+Requires-Dist: matplotlib
+
+# TimesFM Chinese Stock Forecast (Clean Version)
+
+This is a clean, standalone repository for forecasting Chinese stock prices using the TimesFM model.
+
+## Setup
+
+1. **Install Dependencies**:
+   ```bash
+   pip install -r requirements.txt
+   pip install -e .
+   ```
+
+2. **Configure Environment**:
+   Create a `.env` file or export the following variables:
+   - `TUSHARE_TOKEN`: Your Tushare API token.
+   - `TIMESFM_REPO`: Path to the original `timesfm` repository (used to find the `timesfm` library and model weights).
+   - `TIMESFM_MODEL_PATH` (Optional): Direct path to the model weights directory.
+
+## Usage
+
+Run the forecast script:
+```bash
+python scripts/run_cn_forecast.py \
+  --provider akshare \
+  --symbol 600519 \
+  --start 2024-01-01 \
+  --end 2024-12-31 \
+  --horizon 5 \
+  --output-dir ./outputs/maotai
+```
+
+Or use the installed CLI:
+```bash
+timesfm-cn-forecast \
+  --provider local \
+  --symbol 002594 \
+  --start 2024-01-01 \
+  --horizon 5
+```
+
+## Advanced Usage: Model Finetuning
+
+You can further improve forecast accuracy by training a linear residual adapter for specific stocks.
+
+1. **Train the adapter**:
+   ```bash
+   python src/timesfm_cn_forecast/advanced/finetuning.py
+   ```
+   This will save the adapter weights to `data/tbea_adapter.pth` by default.
+
+2. **Run forecast with the adapter**:
+   ```bash
+   python scripts/run_cn_forecast.py \
+     --provider local \
+     --symbol 600089 \
+     --input-csv data/600089.csv \
+     --adapter data/tbea_adapter.pth \
+     --horizon 1
+   ```
+
