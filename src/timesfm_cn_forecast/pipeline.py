@@ -1,19 +1,23 @@
 #!/usr/bin/env python3
 # -*- coding: utf-8 -*-
-"""预测流程编排。"""
+"""预测流水线核心逻辑。"""
 
 from __future__ import annotations
 
 import json
 import os
 from pathlib import Path
+from typing import Any, Dict, List, Optional
 
 import numpy as np
 import pandas as pd
+import matplotlib.pyplot as plt
+from matplotlib import font_manager
+import matplotlib.dates as mdates
+from matplotlib.patches import Rectangle
 
-from .modeling import 加载模型, 运行预测, 默认模型目录
-from .providers import 加载历史数据, 数据请求
-from .advanced.modeling import load_advanced_model
+from .modeling import 加载模型, 运行预测, 默认模型目录, load_advanced_model, AdvancedStockModel
+from .providers import 加载历史数据, 数据请求, 批量加载历史数据
 
 
 def run_pipeline(args) -> None:
@@ -77,6 +81,75 @@ def run_pipeline(args) -> None:
         model_dir=model_dir,
         kline=getattr(args, "kline", False),
     )
+
+
+class BatchRankingPipeline:
+    """批量股票预测与排名管线。"""
+    def __init__(self, model: AdvancedStockModel):
+        self.model = model
+
+    def run(
+        self,
+        symbols: List[str],
+        provider: str,
+        start_date: str,
+        end_date: str,
+        context_len: int = 60,
+        horizon_len: int = 1,
+        **kwargs
+    ) -> List[Dict[str, Any]]:
+        """运行批量预测并按预期收益率排序。"""
+        print(f"正在为 {len(symbols)} 只股票批量加载数据 ({provider})...")
+        
+        wide_df = 批量加载历史数据(
+            symbols=symbols,
+            provider=provider,
+            start=start_date,
+            end=end_date,
+            **kwargs
+        )
+        
+        if wide_df.empty:
+            return []
+
+        results = []
+        actual_symbols = wide_df.columns
+        for symbol in actual_symbols:
+            try:
+                series = wide_df[symbol].dropna().values
+                if len(series) < context_len:
+                    continue
+                
+                model_input = series[-context_len:].astype(np.float32)
+                pts, _ = self.model.forecast(inputs=[model_input], horizon=horizon_len)
+                
+                pred_price = float(pts[0, 0])
+                last_price = float(series[-1])
+                expected_return = (pred_price - last_price) / last_price * 100
+                
+                results.append({
+                    "symbol": symbol,
+                    "last_price": last_price,
+                    "predicted_price": pred_price,
+                    "expected_return": expected_return,
+                    "timestamp": str(wide_df.index[-1])
+                })
+            except Exception as e:
+                print(f"预测股票 {symbol} 时出错: {e}")
+
+        return sorted(results, key=lambda x: x["expected_return"], reverse=True)
+
+def run_batch_ranking(
+    model: AdvancedStockModel,
+    symbols: List[str],
+    provider: str,
+    start_date: str,
+    end_date: str,
+    **kwargs
+) -> List[Dict[str, Any]]:
+    """批量排名入口。"""
+    pipeline = BatchRankingPipeline(model)
+    return pipeline.run(symbols, provider, start_date, end_date, **kwargs)
 
 
 def 保存结果(
