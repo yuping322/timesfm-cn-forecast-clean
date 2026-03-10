@@ -32,7 +32,7 @@ class FeatureExtractor:
         9. 成交量 (volume) - 如果提供
         """
         if len(context) == 0:
-            return np.zeros(9, dtype=np.float32)
+            return np.zeros(15, dtype=np.float32)
             
         last_price = context[-1]
         mean_price = float(np.mean(context))
@@ -48,6 +48,10 @@ class FeatureExtractor:
             volatility
         ]
         
+        # 增加技术指标
+        indicators = FeatureExtractor._calculate_indicators(context)
+        features.extend(indicators)
+        
         if ohlcv_context is not None and ohlcv_context.shape[1] >= 4:
             # ohlcv_context 假设为 [N, 4] -> open, high, low, volume
             last_ohlcv = ohlcv_context[-1]
@@ -56,6 +60,48 @@ class FeatureExtractor:
             features.extend([0.0] * 4)
             
         return np.array(features, dtype=np.float32)
+
+    @staticmethod
+    def _calculate_indicators(context: np.ndarray) -> List[float]:
+        """计算 MACD, RSI, Bollinger Bands。"""
+        if len(context) < 30:
+            return [0.0] * 6
+            
+        # EMA 函数
+        def ema(data, window):
+            alpha = 2 / (window + 1)
+            ema_values = np.zeros_like(data)
+            ema_values[0] = data[0]
+            for i in range(1, len(data)):
+                ema_values[i] = alpha * data[i] + (1 - alpha) * ema_values[i-1]
+            return ema_values
+            
+        # MACD
+        ema12 = ema(context, 12)
+        ema26 = ema(context, 26)
+        macd_line = ema12 - ema26
+        signal_line = ema(macd_line, 9)
+        macd_hist = macd_line - signal_line
+        
+        # RSI (14)
+        delta = np.diff(context)
+        gain = np.where(delta > 0, delta, 0)
+        loss = np.where(delta < 0, -delta, 0)
+        avg_gain = np.mean(gain[-14:])
+        avg_loss = np.mean(loss[-14:])
+        if avg_loss == 0:
+            rsi = 100.0
+        else:
+            rs = avg_gain / avg_loss
+            rsi = 100.0 - (100.0 / (1.0 + rs))
+            
+        # Bollinger Bands (20)
+        ma20 = np.mean(context[-20:])
+        std20 = np.std(context[-20:])
+        upper = ma20 + 2 * std20
+        lower = ma20 - 2 * std20
+        
+        return [float(macd_line[-1]), float(signal_line[-1]), float(macd_hist[-1]), float(rsi), float(upper), float(lower)]
 
 class LinearAdapter:
     def __init__(self, weights: AdapterWeights):
@@ -95,7 +141,11 @@ def train_linear_adapter(
     
     coef, *_ = np.linalg.lstsq(X_aug, residuals, rcond=None)
     
-    feature_names = ["base_pred", "last_price", "mean_price", "pct_change", "volatility", "open", "high", "low", "volume"]
+    feature_names = [
+        "base_pred", "last_price", "mean_price", "pct_change", "volatility",
+        "macd", "macd_signal", "macd_hist", "rsi", "boll_upper", "boll_lower",
+        "open", "high", "low", "volume"
+    ]
     
     return AdapterWeights(
         coef=coef.astype(np.float32),
