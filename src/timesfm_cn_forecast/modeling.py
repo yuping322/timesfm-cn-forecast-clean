@@ -42,7 +42,8 @@ except ImportError:
     TimesFM_2p5_200M_torch = None
     ForecastConfig = None
 
-from .finetuning import LinearAdapter, load_adapter, FeatureExtractor
+from .finetuning import LinearAdapter, load_adapter
+from .features import FeatureExtractor
 
 def 默认模型目录() -> str:
     env_model_path = os.environ.get("TIMESFM_MODEL_PATH")
@@ -120,7 +121,9 @@ class AdvancedStockModel:
         for i, context in enumerate(inputs):
             base_val = pts[i, 0]
             ohlcv_context = ohlcv_inputs[i] if ohlcv_inputs and len(ohlcv_inputs) > i else None
-            features = FeatureExtractor.compute(context, base_val, ohlcv_context=ohlcv_context)
+            # 从适配器中读取训练时使用的特征集
+            feature_names = self.adapter.weights.feature_names
+            features = FeatureExtractor.compute(context, base_val, ohlcv_context=ohlcv_context, feature_names=feature_names)
             
             # 使用适配器修正
             residual = self.adapter.apply(features.reshape(1, -1))[0]

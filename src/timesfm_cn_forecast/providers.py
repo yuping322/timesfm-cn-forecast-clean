@@ -13,7 +13,7 @@ import pandas as pd
 
 
 @dataclass
-class 数据请求:
+class DataRequest:
     provider: str
     symbol: str | None = None
     start: str | None = None
@@ -31,7 +31,7 @@ class 数据请求:
     kline: bool = False
 
 
-def 标准化代码(symbol: str, provider: str) -> str:
+def standardize_symbol(symbol: str, provider: str) -> str:
     """根据数据源类型标准化股票代码格式。"""
     s = symbol.lower()
     # 移除前缀以便计算
@@ -63,7 +63,7 @@ def 标准化代码(symbol: str, provider: str) -> str:
     return pure_code
 
 
-def 批量加载历史数据(
+def batch_load_historical_data(
     symbols: list[str],
     provider: str,
     start: str | None = None,
@@ -77,7 +77,7 @@ def 批量加载历史数据(
     for s in symbols:
         try:
             # 构造临时的请求对象以复用现有逻辑
-            req = 数据请求(
+            req = DataRequest(
                 provider=provider,
                 symbol=s,
                 start=start,
@@ -94,7 +94,7 @@ def 批量加载历史数据(
                 akshare_adjust=kwargs.get("akshare_adjust", ""),
                 kline=kwargs.get("kline", False),
             )
-            df = 加载历史数据(req)
+            df = load_historical_data(req)
             if not df.empty:
                 df = df.rename(columns={"value": s})
                 frames.append(df.set_index("date")[s])
@@ -108,19 +108,19 @@ def 批量加载历史数据(
     return pd.concat(frames, axis=1).sort_index()
 
 
-def 加载历史数据(req: 数据请求) -> pd.DataFrame:
+def load_historical_data(req: DataRequest) -> pd.DataFrame:
     if req.provider == "local":
-        return 从本地加载(req)
+        return load_from_local(req)
     if req.provider == "oss":
-        return 从OSS加载(req)
+        return load_from_oss(req)
     if req.provider == "tushare":
-        return 从Tushare加载(req)
+        return load_from_tushare(req)
     if req.provider == "akshare":
-        return 从AkShare加载(req)
+        return load_from_akshare(req)
     raise ValueError(f"不支持的数据源: {req.provider}")
 
 
-def 从本地加载(req: 数据请求) -> pd.DataFrame:
+def load_from_local(req: DataRequest) -> pd.DataFrame:
     if req.input_csv:
         df = pd.read_csv(req.input_csv)
     elif req.input_parquet:
@@ -128,7 +128,7 @@ def 从本地加载(req: 数据请求) -> pd.DataFrame:
     elif req.auto_fetch_akshare:
         if not req.symbol:
             raise ValueError("local 自动拉取模式需要提供 --symbol，例如 600519")
-        local_path = _自动拉取到本地(req)
+        local_path = _auto_fetch_to_local(req)
         df = pd.read_csv(local_path)
     else:
         raise ValueError("local 模式必须提供 --input-csv 或 --input-parquet")
@@ -139,12 +139,12 @@ def 从本地加载(req: 数据请求) -> pd.DataFrame:
         date_col = req.date_column
         val_col = req.value_column
         available_cols = [c for c in ohlc_cols if c in df.columns and c != date_col]
-        return _标准化输出(df, date_col, val_col, req.symbol, extra_cols=available_cols)
+        return _standardize_output(df, date_col, val_col, req.symbol, extra_cols=available_cols)
 
-    return _标准化输出(df, req.date_column, req.value_column, req.symbol)
+    return _standardize_output(df, req.date_column, req.value_column, req.symbol)
 
 
-def 从OSS加载(req: 数据请求) -> pd.DataFrame:
+def load_from_oss(req: DataRequest) -> pd.DataFrame:
     try:
         import oss2
     except ImportError as exc:
@@ -164,8 +164,8 @@ def 从OSS加载(req: 数据请求) -> pd.DataFrame:
     auth = oss2.Auth(key_id, key_secret)
     bucket = oss2.Bucket(auth, endpoint, bucket_name)
     
-    # 支持带前缀的标准化代码，如 sh600519
-    formatted_symbol = 标准化代码(req.symbol, "akshare") 
+    # 支持带前缀的standardize_symbol，如 sh600519
+    formatted_symbol = standardize_symbol(req.symbol, "akshare") 
     object_name = req.oss_file_template.format(symbol=formatted_symbol)
     object_path = f"{prefix.rstrip('/')}/{object_name}".lstrip("/")
     
@@ -202,12 +202,12 @@ def 从OSS加载(req: 数据请求) -> pd.DataFrame:
                 extra_cols.append(cn_name)
             elif en_name in df.columns and en_name not in [date_col, val_col]:
                 extra_cols.append(en_name)
-        return _标准化输出(df, date_col, val_col, req.symbol, extra_cols=extra_cols)
+        return _standardize_output(df, date_col, val_col, req.symbol, extra_cols=extra_cols)
 
-    return _标准化输出(df, date_col, val_col, req.symbol)
+    return _standardize_output(df, date_col, val_col, req.symbol)
 
 
-def 从Tushare加载(req: 数据请求) -> pd.DataFrame:
+def load_from_tushare(req: DataRequest) -> pd.DataFrame:
     try:
         import tushare as ts
     except ImportError as exc:
@@ -221,7 +221,7 @@ def 从Tushare加载(req: 数据请求) -> pd.DataFrame:
 
     ts.set_token(token)
     pro = ts.pro_api()
-    ts_code = 标准化代码(req.symbol, "tushare")
+    ts_code = standardize_symbol(req.symbol, "tushare")
     df = pro.daily(ts_code=ts_code, start_date=_tushare_date(req.start), end_date=_tushare_date(req.end))
     if df.empty:
         raise ValueError(f"Tushare 未返回数据: {req.symbol}")
@@ -229,12 +229,12 @@ def 从Tushare加载(req: 数据请求) -> pd.DataFrame:
     if req.kline:
         # Tushare 默认返回: ts_code, trade_date, open, high, low, close, pre_close, change, pct_chg, vol, amount
         extra_cols = [c for c in ["open", "high", "low", "vol"] if c in df.columns]
-        return _标准化输出(df, "trade_date", req.tushare_field, req.symbol, extra_cols=extra_cols)
+        return _standardize_output(df, "trade_date", req.tushare_field, req.symbol, extra_cols=extra_cols)
         
-    return _标准化输出(df, "trade_date", req.tushare_field, req.symbol)
+    return _standardize_output(df, "trade_date", req.tushare_field, req.symbol)
 
 
-def 从AkShare加载(req: 数据请求) -> pd.DataFrame:
+def load_from_akshare(req: DataRequest) -> pd.DataFrame:
     try:
         import akshare as ak
     except ImportError as exc:
@@ -243,7 +243,7 @@ def 从AkShare加载(req: 数据请求) -> pd.DataFrame:
     if not req.symbol:
         raise ValueError("akshare 模式必须提供 --symbol，例如 600519")
 
-    symbol_sina = 标准化代码(req.symbol, "akshare")
+    symbol_sina = standardize_symbol(req.symbol, "akshare")
     start = _akshare_date(req.start)
     end = _akshare_date(req.end)
 
@@ -274,7 +274,7 @@ def 从AkShare加载(req: 数据请求) -> pd.DataFrame:
     
     if req.kline:
         # AkShare 常见列名转换为标准英文
-        # 即使接口返回的是英文，extra_cols 也会在 _标准化输出中被正确识别
+        # 即使接口返回的是英文，extra_cols 也会在 _standardize_output中被正确识别
         ohlc_map = {"开盘": "open", "最高": "high", "最低": "low", "成交量": "volume"}
         extra_cols = []
         for cn, en in ohlc_map.items():
@@ -282,12 +282,12 @@ def 从AkShare加载(req: 数据请求) -> pd.DataFrame:
                 extra_cols.append(cn)
             elif en in df.columns:
                 extra_cols.append(en)
-        return _标准化输出(df, date_col, val_col, req.symbol, extra_cols=extra_cols)
+        return _standardize_output(df, date_col, val_col, req.symbol, extra_cols=extra_cols)
 
-    return _标准化输出(df, date_col, val_col, req.symbol)
+    return _standardize_output(df, date_col, val_col, req.symbol)
 
 
-def _标准化输出(
+def _standardize_output(
     df: pd.DataFrame, date_col: str, val_col: str, symbol: str | None, extra_cols: list[str] | None = None
 ) -> pd.DataFrame:
     # 转换为日期格式并重命名列
@@ -332,12 +332,12 @@ def _akshare_date(date_str: str | None) -> str | None:
     return pd.to_datetime(date_str).strftime("%Y%m%d")
 
 
-def _自动拉取到本地(req: 数据请求) -> str:
-    df = _尝试tushare(req)
+def _auto_fetch_to_local(req: DataRequest) -> str:
+    df = _try_tushare(req)
     if df is None:
-        df = _尝试oss(req)
+        df = _try_oss(req)
     if df is None:
-        df = _尝试akshare(req)
+        df = _try_akshare(req)
 
     # 修正路径寻址
     repo_root = Path(__file__).resolve().parents[2]
@@ -349,28 +349,28 @@ def _自动拉取到本地(req: 数据请求) -> str:
     return str(file_path)
 
 
-def _尝试tushare(req: 数据请求) -> pd.DataFrame | None:
+def _try_tushare(req: DataRequest) -> pd.DataFrame | None:
     token = os.environ.get("TUSHARE_TOKEN")
     if not token:
         return None
     try:
-        return 从Tushare加载(req)
+        return load_from_tushare(req)
     except Exception:
         return None
 
 
-def _尝试oss(req: 数据请求) -> pd.DataFrame | None:
+def _try_oss(req: DataRequest) -> pd.DataFrame | None:
     if not os.environ.get("OSS_ACCESS_KEY_ID"):
         return None
     try:
-        return 从OSS加载(req)
+        return load_from_oss(req)
     except Exception:
         return None
 
 
-def _尝试akshare(req: 数据请求) -> pd.DataFrame | None:
+def _try_akshare(req: DataRequest) -> pd.DataFrame | None:
     try:
-        return 从AkShare加载(req)
+        return load_from_akshare(req)
     except Exception:
         return None
 
@@ -379,3 +379,33 @@ def _auto_date_range(start: str | None, end: str | None) -> tuple[str, str]:
     end_dt = pd.to_datetime(end) if end else pd.Timestamp.today().normalize()
     start_dt = pd.to_datetime(start) if start else end_dt - pd.Timedelta(days=365)
     return start_dt.strftime("%Y%m%d"), end_dt.strftime("%Y%m%d")
+
+
+if __name__ == "__main__":
+    import argparse
+    parser = argparse.ArgumentParser(description="Fetch historical data.")
+    parser.add_argument("--provider", type=str, default="akshare", help="Data provider (akshare, tushare, oss)")
+    parser.add_argument("--symbol", type=str, required=True, help="Stock symbol, e.g., 002594")
+    parser.add_argument("--start", type=str, default="2015-01-01", help="Start date (YYYY-MM-DD)")
+    parser.add_argument("--end", type=str, help="End date (YYYY-MM-DD), default is today")
+    parser.add_argument("--output", type=str, required=True, help="Output CSV path")
+    parser.add_argument("--kline", action="store_true", default=True, help="Fetch K-line format data")
+    
+    args = parser.parse_args()
+    
+    req = DataRequest(
+        provider=args.provider,
+        symbol=args.symbol,
+        start=args.start,
+        end=args.end,
+        kline=args.kline
+    )
+    
+    print(f"Fetching data for {args.symbol} from {args.provider}...")
+    df = load_historical_data(req)
+    print(f"Fetched {len(df)} rows.")
+    
+    output_path = Path(args.output)
+    output_path.parent.mkdir(parents=True, exist_ok=True)
+    df.to_csv(output_path, index=False)
+    print(f"Saved to {output_path}")

@@ -8,7 +8,7 @@ import pandas as pd
 from pathlib import Path
 from typing import List, Dict, Any, Optional
 from .modeling import 加载模型, 运行预测, 默认模型目录, load_advanced_model
-from .providers import 数据请求, 加载历史数据
+from .providers import DataRequest, load_historical_data
 
 def calculate_metrics(y_true: np.ndarray, y_pred: np.ndarray) -> Dict[str, float]:
     """计算评估指标。"""
@@ -36,7 +36,8 @@ def run_backtest(
     context_lengths: List[int],
     horizon: int = 5,
     test_days: int = 20,
-    adapter_path: Optional[str] = None
+    adapter_path: Optional[str] = None,
+    input_csv: Optional[str] = None
 ):
     """
     运行滚动回测。
@@ -46,14 +47,16 @@ def run_backtest(
     # 1. 加载足够长的数据
     # 为了保证回测最后一天也有足够的 context，需要提前多加载一些
     max_context = max(context_lengths)
-    req = 数据请求(
+    req = DataRequest(
         symbol=symbol,
         provider=provider,
         start=start_date,
         end=end_date,
-        kline=True if adapter_path else False
+        kline=True if adapter_path else False,
+        input_csv=input_csv,
+        value_column="value" if provider == "local" else "close"
     )
-    df = 加载历史数据(req)
+    df = load_historical_data(req)
     
     if len(df) < max_context + test_days:
         print(f"数据量不足：需要至少 {max_context + test_days} 天，实际仅有 {len(df)} 天。")
@@ -88,7 +91,11 @@ def run_backtest(
             if adapter_path:
                 # 高级模型预测
                 ohlcv_context = [ohlcv_data[i - clen : i]] if ohlcv_data is not None else None
-                pts, _ = model.forecast(inputs=[context.astype(np.float32)], horizon=1, ohlcv_inputs=ohlcv_context)
+                pts, _ = model.forecast(
+                    inputs=[context.astype(np.float32)], 
+                    horizon=1, 
+                    ohlcv_inputs=ohlcv_context
+                )
                 pred_val = pts[0, 0]
             else:
                 # 基础模型预测
@@ -120,6 +127,7 @@ def main():
     parser.add_argument("--test-days", type=int, default=20, help="回测天数")
     parser.add_argument("--horizon", type=int, default=5, help="预测步长")
     parser.add_argument("--adapter", type=str, help="适配器路径 (可选)")
+    parser.add_argument("--input-csv", type=str, help="本地 CSV 数据路径 (配合 --provider local)")
     
     args = parser.parse_args()
     
@@ -132,7 +140,8 @@ def main():
         context_lengths=context_lengths,
         horizon=args.horizon,
         test_days=args.test_days,
-        adapter_path=args.adapter
+        adapter_path=args.adapter,
+        input_csv=args.input_csv
     )
 
 if __name__ == "__main__":

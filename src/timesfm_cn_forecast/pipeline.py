@@ -17,11 +17,11 @@ import matplotlib.dates as mdates
 from matplotlib.patches import Rectangle
 
 from .modeling import 加载模型, 运行预测, 默认模型目录, load_advanced_model, AdvancedStockModel
-from .providers import 加载历史数据, 数据请求, 批量加载历史数据
+from .providers import load_historical_data, DataRequest, batch_load_historical_data
 
 
 def run_pipeline(args) -> None:
-    请求 = 数据请求(
+    请求 = DataRequest(
         provider=args.provider,
         symbol=args.symbol,
         start=args.start,
@@ -39,7 +39,7 @@ def run_pipeline(args) -> None:
         kline=getattr(args, "kline", False),
     )
 
-    历史数据 = 加载历史数据(请求)
+    历史数据 = load_historical_data(请求)
     if 历史数据.empty:
         raise ValueError("历史数据为空，无法预测")
 
@@ -101,7 +101,7 @@ class BatchRankingPipeline:
         """运行批量预测并按预期收益率排序。"""
         print(f"正在为 {len(symbols)} 只股票批量加载数据 ({provider})...")
         
-        wide_df = 批量加载历史数据(
+        wide_df = batch_load_historical_data(
             symbols=symbols,
             provider=provider,
             start=start_date,

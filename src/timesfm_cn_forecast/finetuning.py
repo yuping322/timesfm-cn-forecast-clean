@@ -4,6 +4,8 @@ from sklearn.preprocessing import StandardScaler
 from dataclasses import dataclass
 from typing import List, Optional
 
+from .features import FeatureExtractor, get_feature_names
+
 @dataclass
 class AdapterWeights:
     coef: np.ndarray
@@ -13,148 +15,6 @@ class AdapterWeights:
     context_len: int
     horizon_len: int
     stock_code: Optional[str] = None
-
-class FeatureExtractor:
-    @staticmethod
-    def compute(context: np.ndarray, base_pred: float, ohlcv_context: Optional[np.ndarray] = None) -> np.ndarray:
-        """
-        提取特征向量用于线性适配器。
-        
-        特征包括：
-        1. 基础预测值 (base_pred)
-        2. 最后价格 (last_price)
-        3. 均值 (mean_price)
-        4. 价格变动百分比 (pct_change)
-        5. 波动率 (volatility)
-        6. 开盘价 (open) - 如果提供
-        7. 最高价 (high) - 如果提供
-        8. 最低价 (low) - 如果提供
-        9. 成交量 (volume) - 如果提供
-        """
-        if len(context) == 0:
-            return np.zeros(15, dtype=np.float32)
-            
-        last_price = context[-1]
-        mean_price = float(np.mean(context))
-        first_price = context[0]
-        pct_change = float((last_price - first_price) / first_price) if first_price != 0 else 0.0
-        volatility = float(np.std(context))
-        
-        features = [
-            base_pred, 
-            last_price, 
-            mean_price, 
-            pct_change, 
-            volatility
-        ]
-        
-        # 1. 基础特征 (5个)
-        features = [
-            base_pred, 
-            last_price, 
-            mean_price, 
-            pct_change, 
-            volatility
-        ]
-        
-        # 2. 增加技术指标 (6个)
-        indicators = FeatureExtractor._calculate_indicators(context)
-        features.extend(indicators)
-        
-        # 3. 原始 OHLCV (4个)
-        if ohlcv_context is not None and ohlcv_context.shape[1] >= 4:
-            # 这里的 ohlcv_context 会包含: open, high, low, close, volume (虽然我们只用4个)
-            last_ohlcv = ohlcv_context[-1]
-            op, hi, lo, cl, vol = last_ohlcv
-            features.extend([op, hi, lo, vol])
-        else:
-            features.extend([0.0] * 4)
-            
-        return np.array(features, dtype=np.float32)
-
-    @staticmethod
-    def _calculate_indicators(context: np.ndarray) -> List[float]:
-        """计算 MACD, RSI, Bollinger Bands。"""
-        if len(context) < 30:
-            return [0.0] * 6
-            
-        # EMA 函数
-        def ema(data, window):
-            alpha = 2 / (window + 1)
-            ema_values = np.zeros_like(data)
-            ema_values[0] = data[0]
-            for i in range(1, len(data)):
-                ema_values[i] = alpha * data[i] + (1 - alpha) * ema_values[i-1]
-            return ema_values
-            
-        # MACD
-        ema12 = ema(context, 12)
-        ema26 = ema(context, 26)
-        macd_line = ema12 - ema26
-        signal_line = ema(macd_line, 9)
-        macd_hist = macd_line - signal_line
-        
-        # RSI (14)
-        delta = np.diff(context)
-        gain = np.where(delta > 0, delta, 0)
-        loss = np.where(delta < 0, -delta, 0)
-        avg_gain = np.mean(gain[-14:])
-        avg_loss = np.mean(loss[-14:])
-        if avg_loss == 0:
-            rsi = 100.0
-        else:
-            rs = avg_gain / avg_loss
-            rsi = 100.0 - (100.0 / (1.0 + rs))
-            
-        # Bollinger Bands (20)
-        ma20 = np.mean(context[-20:])
-        std20 = np.std(context[-20:])
-        upper = ma20 + 2 * std20
-        lower = ma20 - 2 * std20
-        
-        return [float(macd_line[-1]), float(signal_line[-1]), float(macd_hist[-1]), float(rsi), float(upper), float(lower)]
-
-    @staticmethod
-    def _calculate_indicators(context: np.ndarray) -> List[float]:
-        """计算 MACD, RSI, Bollinger Bands。"""
-        if len(context) < 30:
-            return [0.0] * 6
-            
-        # EMA 函数
-        def ema(data, window):
-            alpha = 2 / (window + 1)
-            ema_values = np.zeros_like(data)
-            ema_values[0] = data[0]
-            for i in range(1, len(data)):
-                ema_values[i] = alpha * data[i] + (1 - alpha) * ema_values[i-1]
-            return ema_values
-            
-        # MACD
-        ema12 = ema(context, 12)
-        ema26 = ema(context, 26)
-        macd_line = ema12 - ema26
-        signal_line = ema(macd_line, 9)
-        macd_hist = macd_line - signal_line
-        
-        # RSI (14)
-        delta = np.diff(context)
-        gain = np.where(delta > 0, delta, 0)
-        loss = np.where(delta < 0, -delta, 0)
-        avg_gain = np.mean(gain[-14:])
-        avg_loss = np.mean(loss[-14:])
-        if avg_loss == 0:
-            rsi = 100.0
-        else:
-            rs = avg_gain / avg_loss
-            rsi = 100.0 - (100.0 / (1.0 + rs))
-            
-        # Bollinger Bands (20)
-        ma20 = np.mean(context[-20:])
-        std20 = np.std(context[-20:])
-        upper = ma20 + 2 * std20
-        lower = ma20 - 2 * std20
-        
-        return [float(macd_line[-1]), float(signal_line[-1]), float(macd_hist[-1]), float(rsi), float(upper), float(lower)]
 
 class LinearAdapter:
     def __init__(self, weights: AdapterWeights):
@@ -179,6 +39,7 @@ def train_linear_adapter(
     train_base: np.ndarray,
     context_len: int,
     horizon_len: int,
+    feature_names: List[str],
     stock_code: Optional[str] = None
 ) -> AdapterWeights:
     """
@@ -194,12 +55,6 @@ def train_linear_adapter(
     print(f"X_aug stats: min={np.min(X_aug):.2e}, max={np.max(X_aug):.2e}, has_nan={np.any(np.isnan(X_aug))}")
     
     coef, residuals_sum, rank, s = np.linalg.lstsq(X_aug, residuals, rcond=0.01)
-    
-    feature_names = [
-        "base_pred", "last_price", "mean_price", "pct_change", "volatility",
-        "macd", "macd_signal", "macd_hist", "rsi", "boll_upper", "boll_lower",
-        "open", "high", "low", "volume"
-    ]
     
     return AdapterWeights(
         coef=coef.astype(np.float32),
@@ -249,6 +104,7 @@ def main():
     parser.add_argument("--output-path", type=str, required=True, help="适配器权重 (.pth) 的保存路径")
     parser.add_argument("--context-len", type=int, default=60, help="上下文长度")
     parser.add_argument("--horizon-len", type=int, default=1, help="预测步长")
+    parser.add_argument("--feature-set", type=str, default="technical", help="使用的特征组合名称 (basic, technical, structural, full)")
     
     parser.add_argument("--train-days", type=int, default=None, help="仅使用最近 N 天的数据进行训练。")
     
@@ -284,6 +140,11 @@ def main():
         ohlcv_cols = ["open", "high", "low", "close", "volume"]
         ohlcv = df[ohlcv_cols].values if all(c in df.columns for c in ohlcv_cols) else None
         
+        # 获取特征组合
+        feature_names = get_feature_names(args.feature_set)
+        print(f"使用的特征组合 [{args.feature_set}]: 维度={len(feature_names)}")
+        print(f"特征列表: {feature_names}")
+
         # 3. 准备微调数据
         samples = []
         targets = []
@@ -307,8 +168,8 @@ def main():
                 # 提取 K 线上下文特征
                 ohlcv_context = ohlcv[i : i + CONTEXT_LEN] if ohlcv is not None else None
                 
-                # 计算特征 (26维 + base_pred)
-                feats = FeatureExtractor.compute(context, base_pred, ohlcv_context=ohlcv_context)
+                # 计算特征
+                feats = FeatureExtractor.compute(context, base_pred, ohlcv_context=ohlcv_context, feature_names=feature_names)
                 
                 samples.append(feats)
                 targets.append(target)
@@ -328,6 +189,7 @@ def main():
                 train_base=train_base,
                 context_len=CONTEXT_LEN,
                 horizon_len=HORIZON_LEN,
+                feature_names=feature_names,
                 stock_code=STOCK_CODE
             )
             
