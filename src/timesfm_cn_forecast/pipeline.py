@@ -28,6 +28,7 @@ def run_pipeline(args) -> None:
         end=args.end,
         input_csv=args.input_csv,
         input_parquet=args.input_parquet,
+        duckdb_path=getattr(args, "duckdb_path", None),
         date_column=args.date_column,
         value_column=args.value_column,
         auto_fetch_akshare=_是否自动拉取(args),

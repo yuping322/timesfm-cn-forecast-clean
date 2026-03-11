@@ -20,6 +20,7 @@ class DataRequest:
     end: str | None = None
     input_csv: str | None = None
     input_parquet: str | None = None
+    duckdb_path: str | None = None
     date_column: str = "date"
     value_column: str = "close"
     auto_fetch_akshare: bool = False
@@ -31,24 +32,24 @@ class DataRequest:
     kline: bool = False
 
 
-def standardize_symbol(symbol: str, provider: str) -> str:
-    """根据数据源类型标准化股票代码格式。"""
+def normalize_symbol(symbol: str, target: str) -> str:
+    """统一的代码归一化入口。target: akshare/tushare/duckdb/db 等。"""
     s = symbol.lower()
     # 移除前缀以便计算
     pure_code = "".join(filter(str.isdigit, s)).zfill(6)
-    
-    if provider == "akshare":
+
+    if target in {"akshare", "duckdb", "db"}:
         if s.startswith(("sh", "sz", "bj")):
             return s
         if pure_code.startswith("6"):
             return "sh" + pure_code
-        elif pure_code.startswith(("0", "3")):
+        if pure_code.startswith(("0", "3")):
             return "sz" + pure_code
-        elif pure_code.startswith(("4", "8")):
+        if pure_code.startswith(("4", "8")):
             return "bj" + pure_code
         return pure_code
-        
-    if provider == "tushare":
+
+    if target == "tushare":
         s = symbol.upper()
         if s.endswith((".SH", ".SZ", ".BJ")):
             return s
@@ -59,8 +60,13 @@ def standardize_symbol(symbol: str, provider: str) -> str:
         if pure_code.startswith(("4", "8")):
             return f"{pure_code}.BJ"
         return pure_code
-        
+
     return pure_code
+
+
+def standardize_symbol(symbol: str, provider: str) -> str:
+    """根据数据源类型标准化股票代码格式。"""
+    return normalize_symbol(symbol, provider)
 
 
 def batch_load_historical_data(
@@ -85,7 +91,10 @@ def batch_load_historical_data(
                 input_csv=kwargs.get("input_csv"),
                 input_parquet=kwargs.get("input_parquet"),
                 date_column=kwargs.get("date_column", "date"),
-                value_column=kwargs.get("value_column", "close" if provider == "akshare" else "value"),
+                value_column=kwargs.get(
+                    "value_column",
+                    "close" if provider in {"akshare", "duckdb"} else "value",
+                ),
                 auto_fetch_akshare=False,
                 oss_file_template=kwargs.get("oss_file_template", "{symbol}.csv"),
                 oss_date_column=kwargs.get("oss_date_column", "日期"),
@@ -93,6 +102,7 @@ def batch_load_historical_data(
                 tushare_field=kwargs.get("tushare_field", "close"),
                 akshare_adjust=kwargs.get("akshare_adjust", ""),
                 kline=kwargs.get("kline", False),
+                duckdb_path=kwargs.get("duckdb_path"),
             )
             df = load_historical_data(req)
             if not df.empty:
@@ -117,6 +127,8 @@ def load_historical_data(req: DataRequest) -> pd.DataFrame:
         return load_from_tushare(req)
     if req.provider == "akshare":
         return load_from_akshare(req)
+    if req.provider == "duckdb":
+        return load_from_duckdb(req)
     raise ValueError(f"不支持的数据源: {req.provider}")
 
 
@@ -205,6 +217,50 @@ def load_from_oss(req: DataRequest) -> pd.DataFrame:
         return _standardize_output(df, date_col, val_col, req.symbol, extra_cols=extra_cols)
 
     return _standardize_output(df, date_col, val_col, req.symbol)
+
+
+def load_from_duckdb(req: DataRequest) -> pd.DataFrame:
+    try:
+        import duckdb
+    except ImportError as exc:
+        raise ImportError("使用 duckdb 数据源前请安装 duckdb") from exc
+
+    if not req.duckdb_path:
+        raise ValueError("duckdb 模式必须提供 --duckdb-path")
+    if not req.symbol:
+        raise ValueError("duckdb 模式必须提供 --symbol")
+
+    db_symbol = normalize_symbol(req.symbol, "db")
+    con = duckdb.connect(req.duckdb_path, read_only=True)
+    try:
+        sql = (
+            "SELECT date, open, high, low, close, volume FROM daily_data "
+            "WHERE symbol = ?"
+        )
+        params: list[object] = [db_symbol]
+        if req.akshare_adjust:
+            sql += " AND adjust = ?"
+            params.append(req.akshare_adjust)
+        if req.start:
+            sql += " AND date >= ?"
+            params.append(req.start)
+        if req.end:
+            sql += " AND date <= ?"
+            params.append(req.end)
+        sql += " ORDER BY date"
+        df = con.execute(sql, params).fetchdf()
+    finally:
+        con.close()
+
+    if df.empty:
+        raise ValueError(f"DuckDB 未返回数据: {req.symbol}")
+
+    val_col = req.value_column or "close"
+    if req.kline:
+        extra_cols = [c for c in ["open", "high", "low", "close", "volume"] if c in df.columns]
+        return _standardize_output(df, "date", val_col, req.symbol, extra_cols=extra_cols)
+
+    return _standardize_output(df, "date", val_col, req.symbol)
 
 
 def load_from_tushare(req: DataRequest) -> pd.DataFrame:
@@ -384,12 +440,18 @@ def _auto_date_range(start: str | None, end: str | None) -> tuple[str, str]:
 if __name__ == "__main__":
     import argparse
     parser = argparse.ArgumentParser(description="Fetch historical data.")
-    parser.add_argument("--provider", type=str, default="akshare", help="Data provider (akshare, tushare, oss)")
+    parser.add_argument(
+        "--provider",
+        type=str,
+        default="akshare",
+        help="Data provider (akshare, tushare, oss, duckdb)",
+    )
     parser.add_argument("--symbol", type=str, required=True, help="Stock symbol, e.g., 002594")
     parser.add_argument("--start", type=str, default="2015-01-01", help="Start date (YYYY-MM-DD)")
     parser.add_argument("--end", type=str, help="End date (YYYY-MM-DD), default is today")
     parser.add_argument("--output", type=str, required=True, help="Output CSV path")
     parser.add_argument("--kline", action="store_true", default=True, help="Fetch K-line format data")
+    parser.add_argument("--duckdb-path", type=str, help="DuckDB file path (market.duckdb)")
     
     args = parser.parse_args()
     
@@ -398,7 +460,8 @@ if __name__ == "__main__":
         symbol=args.symbol,
         start=args.start,
         end=args.end,
-        kline=args.kline
+        kline=args.kline,
+        duckdb_path=args.duckdb_path,
     )
     
     print(f"Fetching data for {args.symbol} from {args.provider}...")

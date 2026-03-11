@@ -37,7 +37,8 @@ def run_backtest(
     horizon: int = 5,
     test_days: int = 20,
     adapter_path: Optional[str] = None,
-    input_csv: Optional[str] = None
+    input_csv: Optional[str] = None,
+    duckdb_path: Optional[str] = None,
 ):
     """
     运行滚动回测。
@@ -54,7 +55,8 @@ def run_backtest(
         end=end_date,
         kline=True if adapter_path else False,
         input_csv=input_csv,
-        value_column="value" if provider == "local" else "close"
+        value_column="value" if provider == "local" else "close",
+        duckdb_path=duckdb_path,
     )
     df = load_historical_data(req)
     
@@ -128,6 +130,7 @@ def main():
     parser.add_argument("--horizon", type=int, default=5, help="预测步长")
     parser.add_argument("--adapter", type=str, help="适配器路径 (可选)")
     parser.add_argument("--input-csv", type=str, help="本地 CSV 数据路径 (配合 --provider local)")
+    parser.add_argument("--duckdb-path", type=str, help="DuckDB 文件路径 (market.duckdb)")
     
     args = parser.parse_args()
     
@@ -141,7 +144,8 @@ def main():
         horizon=args.horizon,
         test_days=args.test_days,
         adapter_path=args.adapter,
-        input_csv=args.input_csv
+        input_csv=args.input_csv,
+        duckdb_path=args.duckdb_path,
     )
 
 if __name__ == "__main__":

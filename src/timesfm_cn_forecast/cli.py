@@ -12,7 +12,7 @@ from .pipeline import run_pipeline
 
 def build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(description="中文 TimesFM 历史数据预测工具")
-    parser.add_argument("--provider", choices=["local", "oss", "tushare", "akshare"], required=True)
+    parser.add_argument("--provider", choices=["local", "oss", "tushare", "akshare", "duckdb"], required=True)
     parser.add_argument("--symbol", default=None, help="股票代码或序列标识。local 模式可选。")
     parser.add_argument("--start", default=None, help="开始日期，例如 2025-01-01")
     parser.add_argument("--end", default=None, help="结束日期，例如 2025-12-31")
@@ -27,6 +27,7 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument("--input-parquet", default=None, help="local 模式的 Parquet 输入文件")
     parser.add_argument("--date-column", default="date", help="日期列名")
     parser.add_argument("--value-column", default="close", help="数值列名")
+    parser.add_argument("--duckdb-path", default=None, help="DuckDB 文件路径 (market.duckdb)")
 
     parser.add_argument("--oss-file-template", default="{symbol}.csv", help="OSS 文件模板")
     parser.add_argument("--oss-date-column", default="日期", help="OSS 数据日期列名")
