@@ -35,7 +35,7 @@ def main():
         "--index",
         nargs="+",
         default=list(INDEX_MAP.keys()),
-        help=f"要拉取的指数列表，可选: {list(INDEX_MAP.keys())}，默认全部",
+        help=f"要拉取的分组列表，默认全部。可选: {list(INDEX_MAP.keys())}",
     )
     parser.add_argument(
         "--duckdb-path",
@@ -43,9 +43,19 @@ def main():
         help="index_market.duckdb 文件路径（默认: data/index_market.duckdb）",
     )
     parser.add_argument(
+        "--industry-csv",
+        default="data/industry_category.csv",
+        help="申万行业 CSV 路径（默认: data/industry_category.csv）",
+    )
+    parser.add_argument(
+        "--concept-csv",
+        default="data/concept_category.csv",
+        help="概念 CSV 路径（默认: data/concept_category.csv）",
+    )
+    parser.add_argument(
         "--list",
         action="store_true",
-        help="仅列出 DuckDB 中已存储的指数及成份股数量，不执行拉取",
+        help="仅列出 DuckDB 中已存储的分组及成份股数量，不执行拉取",
     )
     args = parser.parse_args()
 
@@ -70,7 +80,11 @@ def main():
         desc = INDEX_MAP[sym]["description"]
         logger.info(f"=== 开始拉取 [{sym}] {desc} ===")
         try:
-            df = fetch_constituents(sym)
+            df = fetch_constituents(
+                sym,
+                industry_csv=args.industry_csv,
+                concept_csv=args.concept_csv,
+            )
             written = upsert_constituents(df, args.duckdb_path)
             logger.info(f"  [{sym}] 写入完成，共 {written} 条。")
             total_ok += 1
