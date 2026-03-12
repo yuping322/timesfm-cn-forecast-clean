@@ -70,6 +70,13 @@ INDEX_MAP: dict[str, dict] = {
         "prefix_filter": ["68", "4", "8"],
         "description": "中小盘综指（过滤科创/北交所）",
     },
+    "small_25": {
+        "source": "akshare",
+        "codes": ["000002", "399107"],
+        "prefix_filter": [],
+        "limit": 50,
+        "description": "自定义 small_25（临时：未按市值筛选，仅取前 50）",
+    },
     "A": {
         "source": "akshare",
         "codes": ["000002", "399107"],
@@ -317,6 +324,13 @@ def fetch_constituents(
             merged["code"].apply(lambda c: not any(c.startswith(p) for p in prefix_filter))
         ].reset_index(drop=True)
         logger.info(f"  [{index_symbol}] 前缀过滤: {before} -> {len(merged)} 只")
+
+    # 可选：限制数量（如 small_25 临时取前 50）
+    limit = cfg.get("limit")
+    if isinstance(limit, int) and limit > 0:
+        before = len(merged)
+        merged = merged.head(limit).reset_index(drop=True)
+        logger.info(f"  [{index_symbol}] 限制数量: {before} -> {len(merged)} 只")
 
     merged["index_symbol"] = index_symbol
     merged["fetched_at"] = datetime.now(tz=timezone.utc)
