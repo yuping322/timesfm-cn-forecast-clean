@@ -21,6 +21,9 @@ if [ -z "$GROUP" ]; then
   exit 1
 fi
 
+export PATH=/opt/anaconda3/bin:$PATH
+export PYTHONPATH=src
+
 FEATURE_SET="${2:-full}"
 TRAIN_DAYS="${3:-60}"
 HORIZON="${4:-1}"
@@ -30,9 +33,16 @@ MIN_DAYS="${7:-1000}"
 
 MARKET_DUCKDB="${MARKET_DUCKDB:-data/market.duckdb}"
 INDEX_DUCKDB="${INDEX_DUCKDB:-data/index_market.duckdb}"
-OUTPUT_DIR="${OUTPUT_DIR:-data/research}"
 
-python scripts/run_group_eval.py \
+if [ -z "${OUTPUT_DIR:-}" ] || [ "${OUTPUT_DIR:-}" == "data/research" ]; then
+  TIMESTAMP=$(date +"%Y%m%d_%H%M%S")
+  TASK_DIR="data/tasks/eval_group_${GROUP}_${TIMESTAMP}"
+  OUTPUT_DIR="${TASK_DIR}/groups"
+fi
+
+mkdir -p "${OUTPUT_DIR}"
+
+python -m timesfm_cn_forecast.run_group_eval \
   --group "${GROUP}" \
   --market-duckdb "${MARKET_DUCKDB}" \
   --index-duckdb "${INDEX_DUCKDB}" \

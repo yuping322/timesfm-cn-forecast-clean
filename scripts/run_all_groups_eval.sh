@@ -18,7 +18,15 @@ cd "$(dirname "$0")/.."
 
 MARKET_DUCKDB="${MARKET_DUCKDB:-data/market.duckdb}"
 INDEX_DUCKDB="${INDEX_DUCKDB:-data/index_market.duckdb}"
-OUTPUT_DIR="${OUTPUT_DIR:-data/research}"
+
+TIMESTAMP=$(date +"%Y%m%d_%H%M%S")
+TASK_DIR="data/tasks/eval_all_groups_${TIMESTAMP}"
+OUTPUT_DIR="${TASK_DIR}/groups"
+
+mkdir -p "${OUTPUT_DIR}"
+
+export PATH=/opt/anaconda3/bin:$PATH
+export PYTHONPATH=src
 
 FEATURE_SET="${FEATURE_SET:-full}"
 TRAIN_DAYS="${TRAIN_DAYS:-60}"
@@ -68,5 +76,5 @@ for group in $GROUPS; do
 done
 
 if [ "$ANALYZE" = "1" ]; then
-  python scripts/analyze_group_results.py --input-dir "${OUTPUT_DIR}"
+  python -m timesfm_cn_forecast.analyze_group_results --input-dir "${OUTPUT_DIR}"
 fi

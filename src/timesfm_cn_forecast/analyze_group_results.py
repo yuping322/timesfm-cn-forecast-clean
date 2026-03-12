@@ -69,7 +69,13 @@ def main() -> None:
     output_path = Path(args.output) if args.output else input_root / "group_summary.csv"
     output_path.parent.mkdir(parents=True, exist_ok=True)
     summary_df.to_csv(output_path, index=False)
-
+    
+    # Export the best group
+    if not summary_df.empty:
+        best_group = summary_df.iloc[0]["group"]
+        best_group_file = input_root / "best_group.txt"
+        best_group_file.write_text(str(best_group))
+        print(f"Exported best group '{best_group}' to {best_group_file}")
 
 if __name__ == "__main__":
     main()
